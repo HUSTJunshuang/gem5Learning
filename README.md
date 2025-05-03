@@ -1,4 +1,3 @@
-
 # Learning gem5
 
 官方文档指路：[gem5: Learning gem5](https://www.gem5.org/documentation/learning_gem5/introduction/)。——对于绝大多数软件而言，没有人比软件开发者更懂这个软件。
@@ -296,3 +295,130 @@ gem5自带了很多配置脚本，方便用户很迅速的使用gem5。但有一
 * ruby/：存放Ruby cache以及缓存一致性协议相关的配置脚本
 * splash2/：存放运行splash2测试集的脚本
 * topologies/：存放用于创建Ruby缓存层次结构的计算机拓扑实现
+
+### 使用se.py和fs.py
+
+本节会介绍一些 `se.py`和 `fs.py`常用的命令行参数。更多完整系统模拟的细节可参阅完整系统模拟章节。
+
+有两种办法可以查看可选参数列表：使用 `--help`或 `-h`参数或直接阅读源码（`addCommonOptions `函数，定义在 `configs/common/Options.py`）。
+
+```bash
+# 注意，这里官方文档没有更新，源路径的文件已弃用，正确路径如下所示
+build/X86/gem5.opt configs/deprecated/example/se.py --help
+```
+
+接下来进入正题：
+
+```bash
+# 不带其他参数，直接运行hello world程序
+build/X86/gem5.opt configs/deprecated/example/se.py --cmd=tests/test-progs/hello/bin/x86/linux/hello
+# 查看m5out/config.ini可以看到，gem5默认使用原子CPU和原子内存访问，因此不会有真实时序数据如访存延迟
+# 为了运行timing模式，需要指定CPU类型，这里一并设置cache的大小
+build/X86/gem5.opt configs/deprecated/example/se.py --cmd=tests/test-progs/hello/bin/x86/linux/hello --cpu-type=TimingSimpleCPU --l1d_size=64kB --l1i_size=16kB
+# 这里检查config.ini，Ctrl-F可以发现并没有cache，因为必须通过--caches启用cache
+# 正确命令如下（顺序无所谓）
+build/X86/gem5.opt configs/deprecated/example/se.py --cmd=tests/test-progs/hello/bin/x86/linux/hello --cpu-type=TimingSimpleCPU --caches --l1d_size=64kB --l1i_size=16kB
+# 启用cache之后可以发现程序结束运行的时间提前了，再次检查config.ini可以发现确实成功添加了cache
+```
+
+### se.py和fs.py的常用选项
+
+* `--cpu-type=CPU_TYPE`：指定运行的CPU类型
+* `--sys-clock=SYS_CLOCK`：运行在系统速度的顶层时钟
+* `--cpu-clock=CPU_CLOCK`：CPU速度时钟
+* `--mem-type=MEM_TYPE`：指定内存类型，具体选项可通过-h或--help查看
+* `--caches`：启用经典cache
+* `--l2cache`：启用经典cache的情况下，启用L2cache
+* `--ruby`：启用Ruby cache
+* `-m TICKS, --abs-max-tick=TICKS`：指定最多运行的周期数
+* `-I MAXINSTS, --maxinsts=MAXINSTS`：指定最多运行的指令
+* `-c CMD, --cmd=CMD`：指定SE模式运行的二进制文件
+* `-o OPTIONS, --options=OPTIONS`：指定二进制文件的命令行参数，需要使用""
+* `--output=OUTPUT`：重定向stdout到指定文件
+* `--errout=ERROUT`：重定向stderr到指定文件
+
+## 扩展gem5到ARM架构
+
+先来下载一些ARM架构的基准测试二进制文件（这部分内容已经包含在仓库中了）：
+
+```bash
+# gem5根目录下执行
+mkdir -p cpu_tests/benchmarks/bin/arm
+cd cpu_tests/benchmarks/bin/arm
+wget dist.gem5.org/dist/v22-0/test-progs/cpu-tests/bin/arm/Bubblesort
+wget dist.gem5.org/dist/v22-0/test-progs/cpu-tests/bin/arm/FloatMM
+```
+
+接下来构建ARM版的gem5来运行上面的二进制文件（内存不够的话-j5指定少一点线程或增大swap空间）：
+
+```bash
+# gem5根目录下执行
+scons build/ARM/gem5.opt -j`nproc`
+```
+
+### 修改配置脚本适配ARM
+
+需要对之前的simple.py做如下改动，最终代码位于 `configs/tutorials/part1/SimpleCPU-ARM/simple.py`。执行 `build/ARM/gem5.opt configs/tutorials/part1/SimpleCPU-ARM/simle.py`开始运行仿真，能看到 `Exiting @ tick ...`即可。
+
+```python
+# 创建CPU，对于其他类型，RISC-V：RiscvTimingSimpleCPU，ARM：ArmTimingSimpleCPU
+# NEW change CPU from X86TimingSimpleCPU to ArmTimingSimpleCPU
+system.cpu = ArmTimingSimpleCPU()
+...
+# 创建IO控制器并连接到内存总线，对于X86，还需要连接PIO和中断端口到内存总线
+system.cpu.createInterruptController()
+# NEW 除了X86都不需要连接PIO和中断端口到内存总线
+# system.cpu.interrupts[0].pio = system.membus.mem_side_ports
+# system.cpu.interrupts[0].int_requestor = system.membus.cpu_side_ports
+# system.cpu.interrupts[0].int_responder = system.membus.mem_side_ports
+...
+# 创建进程
+# NEW 二进制文件改为arm架构的基准测试文件
+binary = 'cpu_tests/benchmarks/bin/arm/Bubblesort'
+system.workload = SEWorkload.init_compatible(binary)	# gem5V21之后版本，SE（systemcall 仿真模式）
+process = Process()
+process.cmd = [binary]	# 类似argv
+system.cpu.workload = process
+system.cpu.createThreads()
+```
+
+### ARM全系统模拟
+
+> 注意：全系统模拟需要花很长的时间，比如一个小时才能载入内核。有方法可以先执行完模拟再回过头来复现（重播）模拟的细节，但本章不会涉及。
+
+gem5仓库自带了样例系统设置以及配置文件，在 `configs/example/arm/`目录下。
+
+但在运行ARM全系统模拟之前，需要编译一下m5term工具，用于从其他终端连接到运行中的全系统模拟：
+
+```bash
+# 编译m5term
+cd util/term/
+make
+```
+
+还需要从[这里](https://www.gem5.org/documentation/general_docs/fullsystem/guest_binaries)下载完整的Linux镜像文件，存放在根目录下的 `fs_images/`目录下并解压。
+
+> 由于文件较大，本仓库不提供相应文件，但建议将Linux Kernel Image/Bootloader（\*.tar.bz2压缩文件）放在 `fs_images/ARM/`目录下使用tar解压，Linux Disk Images（\*.img.bz2压缩文件）放在前者解压后的 `fs_images/ARM/disks/`目录下使用bzip2解压。
+
+另外，为了方便传参，可以将存放镜像的路径设为环境变量 `IMG_ROOT`，但考虑到使用相对路径也挺方便，这里仅提供官方的环境变量命令。
+
+```bash
+export IMG_ROOT=/absolute/path/to/fs_images/<image-directory-name>
+```
+
+现在，我们终于可以开始运行ARM全系统模拟了，在根目录下开始执行：
+
+```bash
+# 开始执行前，可以看看配置脚本的帮助信息
+./build/ARM/gem5.opt configs/example/arm/fs_bigLITTLE.py -h
+# 设置好相应参数，开始执行
+./build/ARM/gem5.opt configs/example/arm/fs_bigLITTLE.py \
+	--caches \
+	--bootloader="fs_images/ARM/binaries/boot.arm" \
+	--kernel="fs_images/ARM/binaries/vmlinux.arm" \
+	--disk="fs_images/ARM/disks/aarch32-ubuntu-natty-headless.img" \
+	--bootscript="util/dist/test/simple_bootscript.rcS"
+# 开始执行后，我们就可以在另一个终端通过m5term连接到这个模拟，3456为全系统模拟提供的调试端口，可当作串口进行调试
+./util/term/m5term 3456
+# 若要停止模拟，在执行gem5.opt的终端键入Ctrl-C即可
+```
