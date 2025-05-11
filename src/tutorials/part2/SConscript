@@ -1,0 +1,8 @@
+# 导入上层环境和变量，包括编译器、编译参数和路径等信息
+Import('*')
+
+# 声明SimObject以及对应的Python文件和cc文件
+SimObject('MyHelloObject.py', sim_objects=['MyHelloObject'])
+Source('my_hello_object.cc')
+# 注册调试标志
+DebugFlag("MyHelloExample")

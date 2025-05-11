@@ -4,6 +4,8 @@
 
 本文对官方文档进行了适当精简，如需更详细的内容，可参阅官方文档。带有中文注释的示例代码位于 `configs/tutorials/`目录，代码对应的系统架构图可参考官方文档（~~为了帮助读者做到心中有电路，这里没有把官图复制过来~~，另一个原因是我懒）。
 
+# Part 1. gem5入门
+
 ## 构建gem5
 
 安装相关依赖：`protobuf`（对应libprotobuf-dev、protobuf-compiler、libgoogle-perftools-dev）和 `boost`为可选项，其中 `protobuf`用于生成和回放trace，`boost`用于支持SystemC实现。另外，如果希望在conda等软件中配置python虚拟环境，下面命令的最后两项 `python-dev`和 `python`也可以删除。
@@ -422,3 +424,308 @@ export IMG_ROOT=/absolute/path/to/fs_images/<image-directory-name>
 ./util/term/m5term 3456
 # 若要停止模拟，在执行gem5.opt的终端键入Ctrl-C即可
 ```
+
+# Part 2. 修改、扩展gem5
+
+这部分的官方示例代码位于 `src/learning_gem5/part2`和 `configs/learning_gem5/part2`，本仓库带中文注释的手写代码位于 `src/tutorials/part2`和 `configs/tutorials/part2`。
+
+## 配置开发环境
+
+修改任何开源项目的时候，遵守项目风格指南是很重要的。gem5的风格可以在[gem5: C/C++ Coding Style](https://www.gem5.org/documentation/general_docs/development/coding_style/)查阅。
+
+同时，为了帮助用户遵守风格指南，gem5引入了一个脚本来自动检查git提交的代码，这个脚本在第一次构建gem5时会由SCons自动添加到 `.git/config`文件。当你实在想要提交一份没有遵守gem5风格指南的代码时（比如在gem5源码结构外的内容），可以使用git选项 `--no-verify`来跳过风格检查。
+
+gem5风格的要点如下：
+
+* 使用4个空格而不是Tab
+* 对头文件进行排序
+* 类名用大驼峰命名法（如MyClass），成员变量和函数使用小驼峰命名法（如myFunc），局部变量使用蛇形命名法（如local_var）
+* 使用Doxygen风格对文件、类和成员进行归档
+
+另外，在开发gem5时，请使用git的branch特征来单独跟踪自己的修改，方便将你的修改提交回gem5以及从gem5拉取别人的更改而不影响自己的修改。
+
+## 创建一个简单的SimObject
+
+> **注意**：gem5有一个叫 `SimpleObject`的SimObject，所以这里我们不能使用这个名字。
+
+SimObject是封装好的C++对象，能够在Python配置脚本中访问。在gem5中，几乎所有对象都继承自基类SimObject，SimObject提供了gem5中各种各样的对象所需的主要接口。
+
+SimObject有很多可以通过Python配置文件设置的参数。除了像整数、浮点数这样的简单参数，还可以有其他SimObject作为参数。这样就可以创建出像真实机器的复杂系统层次结构。
+
+本章会通过创建一个简单的“HelloWorld”SimObject来介绍如何创建SimObject对象以及所需的样板代码。同时，还会写一个简单的Python配置脚本来实例化我们写的SimObject对象。
+
+在后面的章节中，我们会继续在这个简单的SimObject上进行扩展，尝试引入调试支持、动态事件和对象参数。
+
+> 在开始之前，就像前面说的，建议先创建一个新的git分支来保存自己的修改。如 `git checkout -b hello-simobject`。
+
+### Step 1：为新的SimObject类创建一个Python类
+
+每个SimObject都有一个对应的Python类，这个类描述了该SimObject能在Python配置文件中进行调整的参数。
+
+这里我们只是设计一个简单的SimObject，无需任何参数，所以只在 `src/tutorials/part2`中创建一个文件 `MyHelloObject.py`，并声明一个新类，指定类名与对应的C++头文件路径以及C++类名即可。
+
+```python
+from m5.params import *
+from m5.SimObject import SimObject
+
+# 定义一个MyHelloObject类，继承自SimObject
+class MyHelloObject(SimObject):
+	# 指定类型，gem5底层类型的注册和查找都依赖该字段
+	# type可以和类名不一样，但通常情况下需与被封装的C++类名保持一致（公约），只有少数特殊情况下可以和类名不一样
+	type = 'MyHelloObject'
+	# 指定对应的C++头文件路径和C++类名，因为都在src/目录，所以使用的是相对路径
+	# 同时，头文件名字约定使用类名的蛇形命名形式，即全小写、下划线分隔
+	cxx_header = "tutorials/part2/my_hello_object.hh"
+	cxx_class = "gem5::MyHelloObject"
+```
+
+### Step 2：使用C++实现SimObject
+
+在 `src/tutorials/part2`中创建 `my_hello_object.hh`头文件和 `my_hello_object.cc`实现文件。
+
+代码风格方面，gem5中约定使用 `#ifndef/#endif`宏避免环形包含。然后，SimObject需要在gem5命名空间中进行声明。
+
+虽然SimObject类声明了很多虚函数，但它们都不是纯虚函数，所以这里我们只需要简单地声明一个继承自SimObject的类以及它的构造函数即可。
+
+```cpp
+#ifndef __TUTORIALS_MY_HELLO_OBJECT_HH__
+#define __TUTORIALS_MY_HELLO_OBJECT_HH__
+
+// 编译时自动生成的头文件，路径位于build目录，如build/X86/下
+#include "params/MyHelloObject.hh"
+#include "sim/sim_object.hh"
+
+namespace gem5 {
+
+// 声明MyHelloObject类，继承自SimObject
+class MyHelloObject : public SimObject {
+public:
+	// 所有SimObject子类的构造函数都接收一个参数对象，这个参数对象基于该类所对应的Python类，在构建时自动创建
+	MyHelloObject(const MyHelloObjectParams &p);
+};
+
+} // namespace gem5
+
+#endif // __TUTORIALS_MY_HELLO_OBJECT_HH__
+```
+
+接下来，在 `.cc`文件中实现构造函数。
+
+```cpp
+#include "tutorials/part2/my_hello_object.hh"
+
+#include <iostream>
+
+namespace gem5 {
+
+// 实现构造函数，这里只需要简单地把参数传给SimObject基类
+MyHelloObject::MyHelloObject(const MyHelloObjectParams &params) : SimObject(params) {
+	// gem5实际开发中绝对不能使用cout，而是使用调试标志（debug flags，将在下一章中引入）
+	std::cout << "Hello World! From a SimObject!" << std::endl;
+}
+
+} // namespace gem5
+```
+
+### Step 3：注册SimObject和C++文件
+
+为了编译C++文件和解析Python文件，我们需要通过某种途径将这些文件告诉构建系统。
+
+gem5使用的是SCons构建系统，只需要在存放SimObject代码的目录下创建一个SConscript文件即可，如果目录下已经有这个文件了，则只需要在文件中添加相应声明。
+
+这里，只需要在 `src/tutorials/part2`目录下创建一个SConscript文件并声明SimObject和对应的 `.cc`文件。
+
+```python
+# 导入上层环境和变量，包括编译器、编译参数和路径等信息
+Import('*')
+
+# 声明SimObject以及对应的Python文件和cc文件
+SimObject('MyHelloObject.py', sim_objects=['MyHelloObject'])
+Source('my_hello_object.cc')
+```
+
+### Step 4：重新构建gem5
+
+为了编译和连接新文件，需要重新编译gem5。
+
+```bash
+scons build/X86/gem5.opt
+```
+
+### Step 5：创建配置文件来使用新SimObject
+
+编译完成后，我们就只需要像Part1一样编写Python配置文件来实例化我们自己写的对象了。
+
+在 `configs/tutorials/part2`目录下从创建一个配置文件 `run_hello.py`。由于我们的对象非常简单，所以不需要 `System`对象，但 `Root`对象对于任何gem5都是必要的。
+
+```python
+import m5
+from m5.objects import *
+
+root = Root(full_system = False)
+root.hello = MyHelloObject()
+
+m5.instantiate()
+
+print("Beginning simulation!")
+exit_event = m5.simulate()
+print("Exiting @ tick {} because {}".format(m5.curTick(), exit_event.getCause()))
+```
+
+编写完配置文件之后，即可通过 `build/X86/gem5.opt configs/tutorials/part2/run_hello.py`运行gem5并看到MyHelloObject打印的“Hello World! From a SimObject!”输出了。
+
+> **注意**：在后续章节中给SimObject添加了参数和事件之后，`run_hello.py`就不能正常使用了。
+
+## 调试gem5
+
+gem5通过debug flags提供printf输出形式的踪迹和调试。这些标志允许每个模块都声明调试输出语句，而选择性地激活部分调试输出。
+
+这可以通过运行gem5时修改命令行来实现，例如执行 `build/X86/gem5.opt --debug-flags=DRAM configs/tutorials/part1/SimpleCPU/simple.py | head -n 50`来打开DRAM的调试输出（由于使用了管道将输出提供给head命令，运行完后会有一个报错，可以忽略，感兴趣的读者可以自行搜索相关信息）；执行 `build/X86/gem5.opt --debug-flags=Exec configs/tutorials/part1/SimpleCPU/simple.py | head -n 50`来打开CPU执行相关的调试信息。
+
+事实上，`Exec`标志是一系列标志的集合，可以通过 `build/X86/gem5.opt --debug-help`查看相关信息。
+
+### 添加新的调试标志
+
+上一节中，我们使用的是 `std::cout`进行输出，尽管在gem5中能够使用普通的C/C++ IO方式，但非常不建议这样做。因此，在本节中我们将使用gem5的调试设施来代替它。
+
+为了创建一个新的调试标志，需要在 `SConscript`文件中注册。添加下面这行代码到 `src/tutorials/SConscript`中，这样就声明了一个叫“HelloExample”的调试标志。
+
+然后，在 `my_hello_object.cc`中，我们需要导入自动生成的两个相关头文件，这样就可以使用头文件中的相关（宏）函数代替 `std::cout`。
+
+```cpp
+// @file: src/tutorials/SConscript
+# 注册调试标志
+DebugFlag("MyHelloExample")
+
+// @file: src/tutorials/my_hello_object.cc
+// 添加调试相关头文件，MyHelloExample.hh在构建时自动生成
+#include "base/trace.hh"
+#include "debug/MyHelloExample.hh"
+...
+// std::cout << "Hello World! From a SimObject!" << std::endl;
+// 使用DPRINTF宏替换std::cout，第一个参数表示与HelloExample标志绑定，后续参数为输出信息，用法与printf一致
+// 该宏函数定义在src/base/trace.hh:209，可用grep -r -n -w "#define DPRINTF" src/base/查找
+DPRINTF(MyHelloExample, "Created the hello object\n");
+```
+
+完成修改后，执行 `scons build/X86/gem5.opt`重新编译gem5，再执行 `build/X86/gem5.opt --debug-flags=MyHelloExample configs/tutorials/part2/run_hello.py`即可看到修改后的新输出。
+
+`DPRINTF`每次调用默认都会输出三个信息到 `stdout`标准输出流，依次是当前的时钟周期数（tick）、调用DPRINTF的SimObject变量名和传递给DPRINTF的调试信息字符串。另外，还可以通过 `--debug-file`参数指定输出到任意文件，文件使用相对于gem5输出目录 `m5out/`的相对路径。
+
+### 其他调试函数
+
+`DPRINTF`是gem5中最常用的调试函数，但gem5还提供了一系列其他函数，在一些特殊情况下很有用，可参阅[gem5: base/trace.hh File Reference](https://doxygen.gem5.org/release/current/base_2trace_8hh.html)。
+
+这些函数只有在运行以“opt”或“debug”模式编译的可执行文件时才会激活，即“gem5.opt”或“gem5.debug”。
+
+## 事件触发编程
+
+gem5是一个事件触发的模拟器。本章我们将继续在上一章的 `MyHelloObject`基础上进行扩展，探讨如何创建和规划事件。
+
+### 创建一个简单的事件回调函数
+
+在gem5的事件触发模型中，每个事件都有一个回调函数用来处理这个事件。通常而言，它应该是一个继承自C++ Event的类，但gem5提供了一个封装函数来创建简单的事件。
+
+在 `MyHelloObject`的头文件中，我们只需要声明一个新函数，这个函数必须没有参数和返回值，每次事件触发时都会执行这个函数。然后我们还需要在类中添加一个Event实例，这里我们使用gem5提供的 `EventFunctionWrapper`，它可以执行任何函数。最后，我们还需要添加一个 `startup()`函数，后续再进行详细说明。修改后的 `MyHelloObject`如下：
+
+```cpp
+class MyHelloObject : public SimObject {
+private:
+	// 声明事件的回调函数
+	void processEvent();
+	// 实例化一个事件对象
+	EventFunctionWrapper event;
+public:
+	// 所有SimObject子类的构造函数都接收一个参数对象，这个参数对象基于该类所对应的Python类，在构建时自动创建
+	MyHelloObject(const MyHelloObjectParams &p);
+	// 以重写形式声明启动函数
+	void startup() override;
+};
+```
+
+接下来，我们需要对构造函数进行一定修改，在初始化列表中完成event的构造。`EventFunctionWrapper`需要两个参数，回调函数对象（`std::function<void(void)>`）以及名字，名字通常是绑定这个事件的SimObject的名字。修改如下：
+
+```cpp
+// 实现构造函数，把参数传给SimObject基类并完成event的构造
+MyHelloObject::MyHelloObject(const MyHelloObjectParams &params) :
+	SimObject(params), event([this]{processEvent();}, name()) {
+	DPRINTF(MyHelloExample, "Created the hello object\n");
+}
+
+// 实现回调函数
+void MyHelloObject::processEvent() {
+	DPRINTF(MyHelloExample, "Hello world! Processing the event!\n");
+}
+```
+
+### 事件调度
+
+最后，我们需要调度事件何时执行。通过使用C++的 `schedule`函数在未来某个时间点调度一些事件实例。
+
+我们需要在 `startup()`函数中初始化事件的调度，这个函数允许调度一些内部事件，函数本身直到模拟开始时才会执行。完成以下 `startup()`函数的实现后，重新编译gem5并运行 `run_hello.py`配置脚本即可看到相应输出。运行：`build/X86/gem5.opt --debug-flags=MyHelloExample configs/tutorials/part2/run_hello.py`。
+
+```cpp
+void MyHelloObject::startup() {
+	// 调度event在第100个tick时执行
+	// 还可以基于curTick()设置偏移量，但startup固定在tick为0时执行，因此没有作用以及必要
+	schedule(event, 100);
+}
+```
+
+### 尝试更多事件调度
+
+我们甚至还可以在一个事件处理动作当中调度新的事件。例如，我们将给 `MyHelloObject`添加一个延迟参数和时长参数，下一章中我们还会将这些参数对Python配置文件开放。修改后的类以及对应的函数实现如下，重新编译并运行后可以发现触发了10次event。
+
+```cpp
+// @file: my_hello_object.hh
+// 声明MyHelloObject类，继承自SimObject
+class MyHelloObject : public SimObject {
+private:
+	// 声明事件的回调函数
+	void processEvent();
+	// 实例化一个事件对象
+	EventFunctionWrapper event;
+	// 定义触发延迟以及持续时间
+	const Tick latency;
+	int timesLeft;
+public:
+	// 所有SimObject子类的构造函数都接收一个参数对象，这个参数对象基于该类所对应的Python类，在构建时自动创建
+	MyHelloObject(const MyHelloObjectParams &p);
+	// 以重写形式声明启动函数
+	void startup() override;
+};
+
+
+// @file: my_hello_object.cc
+// 实现构造函数，把参数传给SimObject基类并完成event的构造
+MyHelloObject::MyHelloObject(const MyHelloObjectParams &params) :
+	SimObject(params), event([this]{processEvent();}, name()),
+	latency(100), timesLeft(10) {
+	// gem5实际开发中绝对不能使用cout，而是使用调试标志（debug flags，将在下一章中引入）
+	// std::cout << "Hello World! From a SimObject!" << std::endl;
+	// 使用DPRINTF宏替换std::cout，第一个参数表示与HelloExample标志绑定，后续参数为输出信息，用法与printf一致
+	// 该宏函数定义在src/base/trace.hh:209，可用grep -r -n -w "#define DPRINTF" src/base/查找
+	DPRINTF(MyHelloExample, "Created the hello object\n");
+}
+
+void MyHelloObject::startup() {
+	// 调度event在第100个tick时执行
+	// 还可以基于curTick()设置偏移量，但startup固定在tick为0时执行，因此没有作用以及必要
+	schedule(event, latency);
+}
+
+// 实现回调函数
+void MyHelloObject::processEvent() {
+	--timesLeft;
+	DPRINTF(MyHelloExample, "Hello world! Processing the event! %d left\n", timesLeft);
+	// 当持续次数没减至0时，继续触发event直至完成
+	if (timesLeft <= 0) {
+		DPRINTF(MyHelloExample, "Done firing!\n");
+	}
+	else {
+		schedule(event, curTick() + latency);
+	}
+}
+```
+
+## 为SimObject添加参数和更多事件
