@@ -4,6 +4,8 @@
 // 编译时自动生成的头文件，路径位于build目录，如build/X86/下
 #include "params/MyHelloObject.hh"
 #include "sim/sim_object.hh"
+// NEW 导入MyGoodbyeObject头文件
+#include "tutorials/part2/my_goodbye_object.hh"
 
 namespace gem5 {
 
@@ -14,6 +16,10 @@ private:
 	void processEvent();
 	// 实例化一个事件对象
 	EventFunctionWrapper event;
+	// NEW 定义MyGoodbyeObject指针
+	MyGoodbyeObject *goodbye;
+	// NEW 定义名字变量
+	const std::string myName;
 	// 定义触发延迟以及持续时间
 	const Tick latency;
 	int timesLeft;

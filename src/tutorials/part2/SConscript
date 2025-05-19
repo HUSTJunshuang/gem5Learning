@@ -2,7 +2,8 @@
 Import('*')
 
 # 声明SimObject以及对应的Python文件和cc文件
-SimObject('MyHelloObject.py', sim_objects=['MyHelloObject'])
+SimObject('MyHelloObject.py', sim_objects=['MyHelloObject', 'MyGoodbyeObject'])
 Source('my_hello_object.cc')
+Source('my_goodbye_object.cc')
 # 注册调试标志
 DebugFlag("MyHelloExample")

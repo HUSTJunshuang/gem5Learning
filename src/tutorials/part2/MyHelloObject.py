@@ -10,3 +10,18 @@ class MyHelloObject(SimObject):
 	# 同时，头文件名字约定使用类名的蛇形命名形式，即全小写、下划线分隔
 	cxx_header = "tutorials/part2/my_hello_object.hh"
 	cxx_class = "gem5::MyHelloObject"
+
+	# 添加参数，其中触发次数还指定了默认值为1
+	time_to_wait = Param.Latency("Time before firing the event")
+	number_of_fires = Param.Int(1, "Number of times to fire the event before "
+					"goodbye")
+	# NEW 新的SimObject参数
+	goodbye_object = Param.MyGoodbyeObject("A goodbye object")
+
+class MyGoodbyeObject(SimObject):
+	type = 'MyGoodbyeObject'
+	cxx_header = "tutorials/part2/my_goodbye_object.hh"
+	cxx_class = "gem5::MyGoodbyeObject"
+
+	buffer_size = Param.MemorySize('1kB', "Size of buffer to fill with goodbye")
+	write_bandwidth = Param.MemoryBandwidth('100MB/s', "Bandwidth to fill the buffer")

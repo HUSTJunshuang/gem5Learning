@@ -3,6 +3,7 @@ from m5.objects import *
 
 root = Root(full_system = False)
 root.hello = MyHelloObject()
+root.hello.time_to_wait = '2us'
 
 m5.instantiate()
 
