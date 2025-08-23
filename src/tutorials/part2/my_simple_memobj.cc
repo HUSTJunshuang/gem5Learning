@@ -74,7 +74,9 @@ void MySimpleMemobj::sendRangeChange() {
 
 void MySimpleMemobj::CPUSidePort::sendPacket(PacketPtr pkt) {
     panic_if(blockedPacket != nullptr, "Should never try to send if blocked!");
+    DPRINTF(MySimpleMemobj, "Sending %s to CPU\n", pkt->print());
     if (!sendTimingResp(pkt)) {
+        DPRINTF(MySimpleMemobj, "failed!\n");
         blockedPacket = pkt;
     }
 }

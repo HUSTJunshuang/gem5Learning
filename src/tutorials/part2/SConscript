@@ -4,9 +4,12 @@ Import('*')
 # 声明SimObject以及对应的Python文件和cc文件
 SimObject('MyHelloObject.py', sim_objects=['MyHelloObject', 'MyGoodbyeObject'])
 SimObject('MySimpleMemobj.py', sim_objects=['MySimpleMemobj'])
+SimObject('MySimpleCache.py', sim_objects=['MySimpleCache'])
 Source('my_hello_object.cc')
 Source('my_goodbye_object.cc')
 Source('my_simple_memobj.cc')
+Source('my_simple_cache.cc')
 # 注册调试标志
 DebugFlag("MyHelloExample")
 DebugFlag("MySimpleMemobj", "For MySimpleMemobj")
+DebugFlag("MySimpleCache", "For my cache")
