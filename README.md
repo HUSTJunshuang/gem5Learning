@@ -1455,6 +1455,10 @@ class MySimpleCache(ClockedObject):
 
 最后就是实现 `insert()`函数，该函数每次收到内存侧的响应时都会被调用，将数据插入cache。第一步是检查cache是否满了，如果满了则需要进行替换，在替换时还需要将数据写入下一层存储器。
 
+> 注意：作者由于漏改 `MySimpleCache::handleFunctional()`找了好久的bug，调查后发现，即使是timing模式运行，gem5也会调用 `MySimpleCache::CPUSidePort::recvFunctional()`，通常是用于以下三个用途：①仿真开始前加载二进制文件；②执行系统调用时读写内存；③调试和使用检查点时读写内存。而这里就是因为 `printf()`触发系统调用后需要读取从rodata拷贝到写缓冲的“Hello World!”，如果不对 `handleFunctional()`进行修改，系统调用就会去内存中读取，而拷贝完之后数据还存在于cache中，暂未写回内存，因此就会导致没有输出。
+>
+> 因此，除了二进制文件的加载外，系统调用的缓存命中/缺失也不会被统计，如果需要统计这两类情况下的数据，需要使用Full System模式。
+
 ```cpp
 // @file: src/tutorials/part2/my_simple_cache.hh
 #ifndef __TUTORIALS_MY_SIMPLE_CACHE_HH__
